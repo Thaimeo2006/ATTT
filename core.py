@@ -77,54 +77,16 @@ class Block:
                 break
             self.nonce += 1
 
-class blockchain_server:
-    def __init__(self):
-        self.target = bytes.fromhex("1d00ffff")        
-        self.chain = []
-        self.add_genesis_block()        
-        self.mempool = []
-        self.trans_mining = None
-        self.block_mining = None
-
-    def add_genesis_block(self):
-        first_transaction = Transaction("COINBASE", "00000000", 50)
-        genesis_block = Block(b"\x00"*32, self.target, [first_transaction])
-        genesis_block.mine()
-        self.chain.append(genesis_block)
-
-    def verify_and_add_block(self, new_block: Block):
-        l = len(self.chain)                   
-        for i in range(0, l-1, 1):
-            if (self.chain[i].get_hash() != self.chain[i+1].previous_block_hash):
-                raise Exception("Invalid old block!")
-
-        if (self.chain[-1].get_hash() != new_block.previous_block_hash):
-            warnings.warn("Invalid new block request!")
-
-        else:
-            self.chain.append(new_block)
-            l+=1
-            if l%2016 == 0:
-                self.reduce_target()
-
-    def reduce_target(self):
-        pass
-        #self.target /= 2
-
-    def mine(self):
-        if self.mempool:
-            self.trans_mining = self.mempool[:]
-            self.block_mining = Block(self.chain[-1].get_hash(), self.target, self.trans_mining)
-            self.block_mining.mine()
-
-    def done_mine(self):
-        self.chain.append(self.block_mining)
-
-        mined_hash = {trans.get_hash() for trans in self.trans_mining}
-        self.mempool = [trans for trans in self.mempool if trans.get_hash() not in mined_hash]
-        
-        self.block_mining = None
-        self.trans_mining = None
+    def to_dict(self):
+        return {
+            "version": self.version.hex(),
+            "previous_block_hash": self.previous_block_hash.hex(),
+            "merkle_root": self.merkle_root.hex(),
+            "timestamp": self.timestamp,
+            "target": self.target.hex(),
+            "nonce": self.nonce,
+            "transactions": [trans.to_dict() for trans in self.transactions_list],
+        }
 
 class Wallet:
     def __init__(self, username):
@@ -139,5 +101,3 @@ class Wallet:
     def sign_transaction(self, data):
         return self.private_key.sign(data, sigencode=sigencode_der)
     
-
-
