@@ -1,218 +1,169 @@
-from core import *
+from multiprocessing import Process, Queue, Event, Manager, Lock
 from flask import Flask, request, jsonify
-from threading import Thread, Event, Lock
-import time
-import requests
-import warnings
+from core import Transaction, Block, Wallet
+import json
+import logging
 import os
+import requests
+import time
 
-#global: chain, mempool, target, lock, event
-lock = Lock()
-event = Event()
-event.set()
+PORT = 5000
 
-class blockchain_server:
-    def __init__(self):
-        self.wallet: Wallet
-        if os.path.exists("wallet.json"):
-            with open("wallet.json", "r") as f:
-                wallet_json = json.load(f)
-            self.wallet.username = wallet_json["username"]
-            self.wallet.private_key = SigningKey.from_string(bytes.fromhex(wallet_json["private_key"]), curve=SECP256k1)
-            self.wallet.public_key = self.wallet.private_key.get_verifying_key()
-        else:
-            self.wallet = Wallet("Node")
-            wallet_json = {
-                "username": self.wallet.username,
-                "private_key": self.wallet.private_key.to_string.hex()
-            }
-            with open("wallet.json", "w") as f:
-                json.dump(wallet_json, f)
+def load_chain(chain_json):
+    target = bytes.fromhex(chain_json["target"])
+    chain = []
+    for b_dict in chain_json["chain"]:
+        block = Block.from_dict(b_dict)
+        chain.append(block)
+    return chain, target
+    
+def init_chain(event=None):
+    first_transaction = Transaction("COINBASE", "00000000", 50)
+    genesis_block = Block.create_for_mine(b"\x00"*32, bytes.fromhex("1d00ffff"), [first_transaction])
+    genesis_block.mine(event)
+    return [genesis_block], bytes.fromhex("1d00ffff")
 
-        self.node_ips = json.load("ip.json")
-        found_server = False
-        if self.node_ips:
-            for peer in self.node_ips:
-                try:
-                    response = requests.get(f"{peer}/chain", timeout= 3)
-                    if response.status_code == 200:
-                        self.chain = response.json().get("chain")
-                        self.target = response.json().get("target")
-                        found_server = True
-                        break
-                except requests.exceptions.RequestException:
-                    continue
-        
-        if not found_server:
-            if os.path.exist("chain.json"):
-                with open("chain.json", "r") as f:
-                    chain_json = json.load(f)
-                self.load_chain(chain_json)
-                #self.target = bytes.fromhex("1d00ffff")             
-            else:
-                self.chain = []
-                self.add_genesis_block()   
+def clean_mempool(mempool, transactions_list):
+    remaining_mempool = [trans for trans in list(mempool) if trans not in transactions_list]
+    mempool[:] = remaining_mempool
 
+def adjust_target(target):
+    pass
 
-        self.mempool = []
-        self.trans_mining = None
-        self.block_mining = None
-        self.enable_mine = True
+def listen(chain, mempool, target, lock, event):
+    app = Flask(__name__)
 
-    def background_mine(self):
+    @app.route("/receive_chain", methods = ["GET"])
+    def post_chain():
+        #Enable another node receive your chain
+        with lock:
+            chain_list = [block.to_dict() for block in list(chain)]
+            target_hex = target.value.hex()
 
-        if not self.enable_mine:
-            print("Mining is disabled!")
-        else:
-            while True:
-                if not self.mempool:
-                    time.sleep(1)
-                    continue
-                event.wait()
-                with lock:
-                    reward_transaction = Transaction("COINBASE", self.wallet.get_address(), 50)
-                    self.trans_mining = self.mempool+[reward_transaction]
-                    self.block_mining = Block(self.chain[-1].get_hash(), self.target, self.trans_mining)
-                    self.block_mining.mine()
-
-                    self.done_mine()
-
-
-    def add_genesis_block(self):
-        first_transaction = Transaction("COINBASE", "00000000", 50)
-        genesis_block = Block(b"\x00"*32, self.target, [first_transaction])
-        genesis_block.mine()
-        self.chain.append(genesis_block)
-
-    def verify_and_add_block(self, new_block: Block):
-        l = len(self.chain)                   
-        for i in range(0, l-1, 1):
-            if (self.chain[i].get_hash() != self.chain[i+1].previous_block_hash):
-                raise Exception("Invalid old block!")
-
-        if (self.chain[-1].get_hash() != new_block.previous_block_hash):
-            warnings.warn("Invalid new block request!")
-
-        else:
-            self.chain.append(new_block)
-            l+=1
-            if l%2016 == 0:
-                self.reduce_target()
-
-    def reduce_target(self):
-        pass
-        #self.target /= 2
-
-    def mine(self):
-        if self.mempool:
-            self.trans_mining = self.mempool[:]
-            self.block_mining = Block(self.chain[-1].get_hash(), self.target, self.trans_mining)
-            self.block_mining.mine()
-
-    def done_mine(self):
-        self.chain.append(self.block_mining)
-
-        mined_hash = {trans.get_hash() for trans in self.trans_mining}
-        self.mempool = [trans for trans in self.mempool if trans.get_hash() not in mined_hash]
-        
-        self.block_mining = None
-        self.trans_mining = None
-
-    def load_chain(self, chain_json):
-        self.target = bytes.fromhex(chain_json["target"])
-        self.chain = []
-        for b_dict in chain_json["chain"]:
-            txs = []
-            for tx_dict in b_dict["transactions"]:
-                tx = Transaction(tx_dict["sender"], tx_dict["receiver"], tx_dict["amount"], tx_dict.get("signature", ""))
-                tx.timestamp = tx_dict["timestamp"]
-                txs.append(tx)
-
-            block = Block(
-                previous_block_hash=bytes.fromhex(b_dict["previous_block_hash"]),
-                target=bytes.fromhex(b_dict["target"]),
-                transactions_list=txs,
-                version=bytes.fromhex(b_dict["version"])
-            )
-            block.merkle_root = bytes.fromhex(b_dict["merkle_root"])
-            block.timestamp = b_dict["timestamp"]
-            block.nonce = b_dict["nonce"]
-            self.chain.append(block)
-
-    def save_chain(self):
-        chain_json = {
-            "chain": [block.to_dict() for block in self.chain],
-            "target": self.target.hex()
-        }
-        with open("chain.json", "w") as f:
-            json.dump(chain_json, f, indent= "\t")
-
-app = Flask(__name__)
-Server = blockchain_server()
-
-def broadcast_block(block_dict: dict):
-    for peer in Server.node_ips:
-        url = f"{peer}/receive_new_block"
+        return jsonify({
+            "target": target_hex,
+            "chain": chain_list
+        }), 200
+    
+    @app.route("/get_new_block", methods= ["POST"])
+    def verify_and_add_block():
+        block_json = request.json()
         try:
-            requests.post(url, json = block_dict, timeout=2)
-        except requests.exceptions.RequestException:
-            warnings.warn(f"Cannot send block to {peer}: Request timed out")
+            new_block = Block.from_dict(block_json)
+        except Exception as e:
+            logging.warning(e)
+            return False    
+        #Check server state
+        with lock:
+            for i in range(0, len(chain)-1, 1):
+                if (chain[i].get_hash() != chain[i+1].previous_block_hash):
+                    raise Exception("Invalid old block!")
 
-mine_thread = Thread(target= background_mining, daemon= True)
-mine_thread.start()
-@app.route("/chain", methods= ["GET"])
-def get_chain():
-    with chain_lock:
-        chain_list = [block.to_dict() for block in Server.chain]
-        target_hex = Server.target.hex()
+            #Check previous block hash and target of new block and out the lock
+            if chain[-1] != new_block.previous_block_hash:
+                logging.warning("Previous block hash is not true.")
+                return False
+            if target != new_block.target:
+                logging.warning("Target is different.")
+                return False
+            
+        #Check block
+        b, msg = new_block.verify()
+        if b:
+            with lock:
+                chain.append(new_block)
+                clean_mempool(mempool, new_block.transactions_list)
+                adjust_target(target)
 
-    return jsonify({
-        "target": target_hex,
-        "chain": chain_list
-    }), 200
-
-@app.route("/new_wallet", method = ["POST"])
-def create_wallet():
-    data = request.get_json()
-    username = data.get("username")
-    new_wallet = Wallet("username")
-    return jsonify({
-        "username": username,
-        "address": new_wallet.get_address,
-        "private_key": new_wallet.private_key.to_string().hex(),
-        "message": "Sign up successfully (Balance is 0)! Make new transaction to init."
-    }), 201
-
-@app.route("/transactions/new", method= ["POST"])
-def new_transaction():
-    global is_mining
-    data = request.get_json()
-
-    trans = Transaction(data["sender"], data["receiver"], data["amount"], data.get("signature", ""))   
-
-    with chain_lock:
-        Server.mempool.append(trans)
-        print(f"New transaction received. Mempool now is:\n{Server.mempool}")
-
-    if not is_mining:
-        is_mining = True
-
-    return jsonify({"message": "Transaction added to mempool!"})
-
-@app.route("/receive_new_block", methods = ["POST"])
-def receive_block():
-    global is_mining
-    block_request = request.get_json()
-    print("Received new block from another node!")
-
-    with chain_lock:
-        stop_mining_event.set()
+        return jsonify({
+            "valid": str(b),
+            "msg": msg
+        })
+    
+    app.run(host = "0.0.0.0", port= PORT)
 
 
+def mine(chain, mempool, target, lock, event, wallet_public_key):
+    while True:
+        if len(mempool) == 0:
+            time.sleep(2)
+            continue
+
+        reward_transaction = Transaction("COINBASE", wallet_public_key, 50)
+        with lock:
+            #Append reward transaction to the final of transaction list to mine
+            trans_mine = list(mempool)+[reward_transaction]
+            block_mine = Block.create_for_mine(chain[-1].get_hash(), target.value, trans_mine)
+        mining_done, msg = block_mine.mine(event)
+        if not mining_done:
+            logging.info(msg)
+            continue
+        with lock:
+            chain.append(block_mine)
+            clean_mempool(mempool, trans_mine[-1])
+            adjust_target(target)
+
+def send_block():
+    pass
 
 if __name__ == "__main__":
-    from argparse import ArgumentParser
-    parser = ArgumentParser()
-    parser.add_argument("-o", "--option", required=True, choices= ["on", "off"])
-    parser.add_argument("-p", "--port", default = 5000, type= int, help="Port to listen from another node")
-    args = parser.parse_args()
+    #Global var
+    manager = Manager()
+    mempool = manager.list([])
+
+    lock = Lock()
+    event = Event()
+
+    #Find running server in another node, load chain and target if found
+    if not os.path.exists("ip.json"):
+        logging.warning("ip.json not found, server will run locally!")
+        node_ips = []
+        with open("ip.json", "w") as f:
+            json.dump([], f)            
+    else:
+        with open("ip.json", "r") as f:
+            node_ips = json.load(f)
+
+    found_server = False
+    if node_ips:
+        for peer in node_ips:
+            try:
+                response = requests.get(f"http://{peer}:{PORT}/receive_chain", timeout= 3)
+                if response.status_code == 200:
+                    loaded_chain, loaded_target = load_chain(response.json())
+                    chain = manager.list(loaded_chain)
+                    target = manager.Value(bytes, loaded_target)
+                    found_server = True
+                    break
+            except requests.exceptions.RequestException:
+                continue
+    
+    if not found_server:
+        #Only you run the server
+        if os.path.exists("chain.json"):
+            #Load data if this computer used to run server
+            with open("chain.json", "r") as f:
+                chain_json = json.load(f)
+            loaded_chain, loaded_target = load_chain(chain_json)
+            chain = manager.list(loaded_chain)
+            target = manager.Value(bytes, loaded_target)
+        else:
+            #Init first block
+            loaded_chain, loaded_target = init_chain()
+            chain = manager.list(loaded_chain)
+            target = manager.Value(bytes, loaded_target)
+
+    #Create wallet
+    if os.path.exists("my_wallet.json"):
+        #Auto sign in       
+        with open("my_wallet.json", "r") as f:
+            wallet_json = json.load(f)
+        wallet = Wallet.from_dict(wallet_json)
+    else:
+        #Auto sign up
+        wallet = Wallet()
+        wallet_json = {
+            "private_key": wallet.private_key.to_string().hex()
+        }
+        with open("my_wallet.json", "w") as f:
+            json.dump(wallet_json, f)
