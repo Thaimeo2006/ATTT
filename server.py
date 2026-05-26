@@ -24,7 +24,8 @@ def init_chain(event=None):
     return [genesis_block], bytes.fromhex("1d00ffff")
 
 def clean_mempool(mempool, transactions_list):
-    remaining_mempool = [trans for trans in list(mempool) if trans not in transactions_list]
+    txid_to_remove = [trans.txid for trans in transactions_list]
+    remaining_mempool = [trans for trans in list(mempool) if trans.txid not in txid_to_remove]
     mempool[:] = remaining_mempool
 
 def adjust_target(target):
@@ -47,12 +48,15 @@ def listen(chain, mempool, target, lock, event):
     
     @app.route("/get_new_block", methods= ["POST"])
     def verify_and_add_block():
-        block_json = request.json()
+        block_json = request.get_json()
         try:
             new_block = Block.from_dict(block_json)
         except Exception as e:
             logging.warning(e)
-            return False    
+            return jsonify({
+                "valid": "False",
+                "msg": str(e)
+            })  
         #Check server state
         with lock:
             for i in range(0, len(chain)-1, 1):
@@ -60,27 +64,36 @@ def listen(chain, mempool, target, lock, event):
                     raise Exception("Invalid old block!")
 
             #Check previous block hash and target of new block and out the lock
-            if chain[-1] != new_block.previous_block_hash:
+            if chain[-1].get_hash() != new_block.previous_block_hash:
                 logging.warning("Previous block hash is not true.")
-                return False
-            if target != new_block.target:
+                return jsonify({
+                    "valid": "False",
+                    "msg": "Previous block hash is not true."
+                })
+                
+            if target.value != new_block.target:
                 logging.warning("Target is different.")
-                return False
+                return jsonify({
+                    "valid": "False",
+                    "msg": "Target is different."
+                })
             
         #Check block
         b, msg = new_block.verify()
         if b:
+            event.set()
             with lock:
                 chain.append(new_block)
                 clean_mempool(mempool, new_block.transactions_list)
                 adjust_target(target)
+            event.clear()
 
         return jsonify({
             "valid": str(b),
             "msg": msg
         })
     
-    app.run(host = "0.0.0.0", port= PORT)
+    app.run(host = "0.0.0.0", port= PORT, use_reloader= False)
 
 
 def mine(chain, mempool, target, lock, event, wallet_public_key):
@@ -100,7 +113,7 @@ def mine(chain, mempool, target, lock, event, wallet_public_key):
             continue
         with lock:
             chain.append(block_mine)
-            clean_mempool(mempool, trans_mine[-1])
+            clean_mempool(mempool, trans_mine[:-1])
             adjust_target(target)
 
 def send_block():
