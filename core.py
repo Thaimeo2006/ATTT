@@ -67,7 +67,7 @@ class Transaction:
     
     @classmethod
     def create_reward(cls, receiver, amount):
-        t = cls(COINBASE_ADDRESS, receiver, amount)
+        t = cls.new(COINBASE_ADDRESS, receiver, amount)
         t.signature = "0x"+"00"*32
         info = {
             "sender": t.sender,
@@ -176,6 +176,7 @@ class Block:
         num = target_to_num(self.target)
         for self.nonce in range(0, 1<<32):
             if event is not None and event.is_set():
+                event.clear()
                 return False, "Mining is interrupted since listen process verified and added new block."
             if int.from_bytes(self.get_hash(), "big") < num:
                 return True, "Found nonce!"
@@ -202,7 +203,7 @@ class Block:
             if not b:
                 return False, f"{msg} in {trans}"
         reward_trans = self.transactions_list[-1]
-        if reward_trans.sender != "COINBASE" or reward_trans.amount != 50:
+        if reward_trans.sender != COINBASE_ADDRESS or reward_trans.amount != 50:
             return False, "Invalid reward transation"
         if self.merkle_root != merkle(self.transactions_list):
             return False, "Invalid merkle root."

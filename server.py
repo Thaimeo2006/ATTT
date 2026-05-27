@@ -222,7 +222,6 @@ def listen(chain, mempool, target, public_wallet, state_lock, event, mempool_loc
                     with mempool_lock:
                         for block in chain:
                             clean_mempool(mempool, block.transactions_list)
-                    event.clear()
                     return jsonify({
                         "valid": "False",
                         "msg": "Chain was outdated."
@@ -249,7 +248,6 @@ def listen(chain, mempool, target, public_wallet, state_lock, event, mempool_loc
                 adjust_target(target)
             with mempool_lock:
                 clean_mempool(mempool, new_block.transactions_list)
-            event.clear()
             return jsonify({
                 "valid": "True",
                 "msg": msg
