@@ -8,6 +8,7 @@ from ecdsa.util import sigencode_der, sigdecode_der
 HASH = hashlib.sha256
 VERSION = bytes.fromhex("00000001")             #4 bytes
 SEPARATORS = (",", ":")
+COINBASE_ADDRESS = bytes.hex(b"COINBASE")
 
 def target_to_num(target: bytes):
     exponent, coefficient = target[:1], target[1:]
@@ -23,8 +24,8 @@ def merkle(transactions_list):
         l = len(hash_list)
         for i in range(0, l-1, 2):
             result.append(HASH(hash_list[i]+hash_list[i+1]).digest())
-        if i == l-1:
-            result.append(HASH(hash_list[l-1]*2).digest())
+        if l%2 != 0:
+            result.append(HASH(hash_list[-1]*2).digest())
 
         hash_list = result[:]
         result.clear()
@@ -62,6 +63,20 @@ class Transaction:
     def new(cls, sender, receiver, amount):
         t = cls(sender, receiver, amount)
         t.timestamp = int(time.time())
+        return t
+    
+    @classmethod
+    def create_reward(cls, receiver, amount):
+        t = cls(COINBASE_ADDRESS, receiver, amount)
+        t.signature = "0x"+"00"*32
+        info = {
+            "sender": t.sender,
+            "receiver": t.receiver,
+            "amount": t.amount,
+            "timestamp": t.timestamp,
+            "signature" : t.signature
+        }
+        t.txid = HASH(json.dumps(info, sort_keys= True, separators= SEPARATORS).encode()).hexdigest()
         return t
     
     @classmethod
@@ -116,7 +131,7 @@ class Transaction:
         if self.txid != check_txid:
             return False, "Invalid txid."
         else:
-            return True, "Verify successful."
+            return True, "Sucessfully verified."
 
 
 class Block:
