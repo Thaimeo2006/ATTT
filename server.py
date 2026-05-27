@@ -17,11 +17,32 @@ def load_chain(chain_json):
         chain.append(block)
     return chain, target
     
-def init_chain(event=None):
-    first_transaction = Transaction("COINBASE", "00000000", 50)
+def init_chain(wallet, event=None):
+    first_transaction = Transaction.create_reward(wallet.get_address(), 50)
     genesis_block = Block.create_for_mine(b"\x00"*32, bytes.fromhex("1d00ffff"), [first_transaction])
     genesis_block.mine(event)
     return [genesis_block], bytes.fromhex("1d00ffff")
+
+def is_valid_chain(chain):
+    """Check verification of blockchain"""
+    temp_chain = list(chain)
+    if len(temp_chain) == 0:
+        return False
+        
+    for i in range(1, len(temp_chain)):
+        current_block = temp_chain[i]
+        prev_block = temp_chain[i-1]
+
+        #Check previous_block_hash
+        if current_block.previous_block_hash != prev_block.get_hash():
+            return False
+            
+        #Block verify
+        is_valid, _ = current_block.verify()
+        if not is_valid:
+            return False
+            
+    return True
 
 def check_txid_and_get_balance_from_chain(transaction, chain):
     balance = 0
@@ -90,6 +111,41 @@ def broadcast_block(block, node_ips):
         t = threading.Thread(target=send_new_block, args=(ip, block_dict), daemon= True)
         t.start()
 
+def solve_conflicts(chain, target, node_ips):
+    """
+    Find and replace the state by the longer chain if found
+    """
+    longest_chain = None
+    max_length = len(chain)
+    new_target = None
+
+    for peer in node_ips:
+        try:
+            response = requests.get(f"{peer}/receive_chain", timeout=3)
+            if response.status_code == 200:
+                chain_json = response.json()
+                peer_length = len(chain_json["chain"])
+                
+                # Chỉ kiểm tra nếu chuỗi của họ DÀI HƠN chuỗi của mình
+                if peer_length > max_length:
+                    temp_chain, temp_target = load_chain(chain_json)
+                    
+                    # Xác thực toàn bộ chuỗi của họ
+                    if is_valid_chain(temp_chain):
+                        max_length = peer_length
+                        longest_chain = temp_chain
+                        new_target = temp_target
+        except requests.exceptions.RequestException:
+            continue
+
+    # If found longer valid chain
+    if longest_chain:
+        chain[:] = longest_chain
+        target.value = new_target
+        return True
+        
+    return False
+
 def save_state(chain, target, ip, pw_json):
     try:
         chain_list = [block.to_dict() for block in list(chain)]
@@ -157,6 +213,21 @@ def listen(chain, mempool, target, public_wallet, state_lock, event, mempool_loc
             #Check previous block hash and target of new block and out the state_lock
             if chain[-1].get_hash() != new_block.previous_block_hash:
                 logging.warning("Previous block hash is not true.")
+
+                will_replace = solve_conflicts(chain, target, node_ips)
+                if will_replace:
+                    logging.info("Replaced by the longest chain in the network.")
+
+                    event.set()
+                    with mempool_lock:
+                        for block in chain:
+                            clean_mempool(mempool, block.transactions_list)
+                    event.clear()
+                    return jsonify({
+                        "valid": "False",
+                        "msg": "Chain was outdated."
+                    })
+
                 return jsonify({
                     "valid": "False",
                     "msg": "Previous block hash is not true."
@@ -264,7 +335,7 @@ def mine(chain, mempool, target, state_lock, mempool_lock, event, wallet_public_
             time.sleep(2)
             continue
 
-        reward_transaction = Transaction("COINBASE", wallet_public_key, 50)
+        reward_transaction = Transaction.create_reward(wallet_public_key, 50)
         #Append reward transaction to the final of transaction list to mine
         with mempool_lock:
             trans_mine = list(mempool)+[reward_transaction]
@@ -286,7 +357,7 @@ def mine(chain, mempool, target, state_lock, mempool_lock, event, wallet_public_
         
 
 if __name__ == "__main__":
-    #Global var
+    #Global var: mempool, chain, target, public_wallet
     manager = Manager()
     mempool = manager.list([])
     
@@ -296,6 +367,24 @@ if __name__ == "__main__":
     event = Event()
 
     pw_lock = Lock()
+
+    #Create own wallet and load public wallet
+    if os.path.exists("my_wallet.json"):
+        #Auto sign in       
+        with open("my_wallet.json", "r") as f:
+            wallet_json = json.load(f)
+        wallet = Wallet.from_dict(wallet_json)
+        with open("public_wallet.json", "r") as f:
+            public_wallet = manager.list(json.load(f))
+    else:
+        #Auto sign up, create empty public_wallet.json and add your own public key to this
+        wallet = Wallet()
+        wallet_json = {
+            "private_key": wallet.private_key.to_string().hex()
+        }
+        with open("my_wallet.json", "w") as f:
+            json.dump(wallet_json, f)
+        public_wallet = manager.list([wallet.get_address()])
 
     #Find running server in another node, load chain and target if found
     if not os.path.exists("ip.json"):
@@ -332,27 +421,9 @@ if __name__ == "__main__":
             target = manager.Value(bytes, loaded_target)
         else:
             #Init first block
-            loaded_chain, loaded_target = init_chain()
+            loaded_chain, loaded_target = init_chain(wallet)
             chain = manager.list(loaded_chain)
             target = manager.Value(bytes, loaded_target)
-
-    #Create own wallet and load public wallet
-    if os.path.exists("my_wallet.json"):
-        #Auto sign in       
-        with open("my_wallet.json", "r") as f:
-            wallet_json = json.load(f)
-        wallet = Wallet.from_dict(wallet_json)
-        with open("public_wallet.json", "r") as f:
-            public_wallet = manager.list(json.load(f))
-    else:
-        #Auto sign up, create empty public_wallet.json and add your own public key to this
-        wallet = Wallet()
-        wallet_json = {
-            "private_key": wallet.private_key.to_string().hex()
-        }
-        with open("my_wallet.json", "w") as f:
-            json.dump(wallet_json, f)
-        public_wallet = manager.list([wallet.get_address()])
 
 
     ListenProcess = Process(target= listen, args = (chain, mempool, target, public_wallet, state_lock, event, mempool_lock, pw_lock, node_ips))
