@@ -37,7 +37,7 @@ def check_txid_and_get_balance_from_chain(transaction, chain):
             if trans.receiver == transaction.sender:
                 balance += trans.amount
                 continue
-        if valid_txid = False: break
+        if valid_txid == False: break
     return valid_txid, balance
 
 def check_txid_and_get_balance_from_mempool(transaction, mempool):
@@ -63,12 +63,25 @@ def clean_mempool(mempool, transactions_list):
 def adjust_target(target):
     pass
 
+def send_new_transaction(peer_url, tx_dict):
+    try:
+        requests.post(f"{peer_url}/make_new_transaction?from_server=true", json=tx_dict, timeout=3)
+        logging.info(f"[Broadcast TX] Đã gửi giao dịch tới {peer_url}")
+    except requests.exceptions.RequestException:
+        pass
+
+def broadcast_transaction(transaction, node_ips):
+    trans_dict = transaction.to_dict()
+    for ip in node_ips:
+        t = threading.Thread(target=send_new_transaction, args=(ip, trans_dict), daemon=True)
+        t.start()
+
 def send_new_block(peer_url, block_dict):
     try:
         requests.post(f"{peer_url}/get_new_block", json=block_dict, timeout=3)
         logging.info(f"Đã gửi block tới {peer_url}")
     except requests.exceptions.RequestException:
-        logging.warning(f"Node {peer_url} không phản hồi.")
+        pass
 
 def broadcast_block(block, node_ips):
     block_dict = block.to_dict()
@@ -104,7 +117,7 @@ def save_state(chain, target, ip, pw_json):
     except Exception as e:
         logging.warning(f"Error while saving public wallet list: {e}")
 
-def listen(chain, mempool, target, public_wallet, state_lock, event, mempool_lock, pw_lock):
+def listen(chain, mempool, target, public_wallet, state_lock, event, mempool_lock, pw_lock, node_ips):
     app = Flask(__name__)
 
     @app.route("/receive_chain", methods = ["GET"])
@@ -136,7 +149,7 @@ def listen(chain, mempool, target, public_wallet, state_lock, event, mempool_loc
                 return jsonify({
                     "valid": "undefined",
                     "msg": "Server is in setup process."
-                })
+                }), 400
             for i in range(0, len(chain)-1, 1):
                 if (chain[i].get_hash() != chain[i+1].previous_block_hash):
                     raise Exception("Invalid old block!")
@@ -202,6 +215,8 @@ def listen(chain, mempool, target, public_wallet, state_lock, event, mempool_loc
         
     @app.route("/make_new_transaction", methods= ["POST"])
     def verify_add_and_broadcast_transaction():
+        #Check if from server node
+        is_from_server = request.args.get("from_server")
         response = request.get_json()
         try:
             new_transaction = Transaction.from_dict(response)
@@ -210,6 +225,7 @@ def listen(chain, mempool, target, public_wallet, state_lock, event, mempool_loc
                 "valid": "False",
                 "msg": str(e)
             }), 400
+
         b, msg = new_transaction.verify()
         if not b: return jsonify({
             "valid": "False",
@@ -223,7 +239,7 @@ def listen(chain, mempool, target, public_wallet, state_lock, event, mempool_loc
             return jsonify({
                 "valid": "False",
                 "msg": "Txid is duplicated."
-            })
+            }), 400
         if new_transaction.amount > sender_balance_from_chain+sender_balance_from_mempool:
             return jsonify({
                 "valid": "False",
@@ -231,6 +247,9 @@ def listen(chain, mempool, target, public_wallet, state_lock, event, mempool_loc
             }), 400
         with mempool_lock:
             mempool.append(new_transaction)
+        
+        if not is_from_server:
+            broadcast_transaction(new_transaction, node_ips)
         return jsonify({
             "valid": "True",
             "msg": "Transaction was verified successfully, please wait until it added to the chain."
@@ -336,7 +355,7 @@ if __name__ == "__main__":
         public_wallet = manager.list([wallet.get_address()])
 
 
-    ListenProcess = Process(target= listen, args = (chain, mempool, target, public_wallet, state_lock, event, mempool_lock, pw_lock))
+    ListenProcess = Process(target= listen, args = (chain, mempool, target, public_wallet, state_lock, event, mempool_lock, pw_lock, node_ips))
     MineProcess = Process(target = mine, args = (chain, mempool, target, state_lock, mempool_lock, event, wallet.get_address(), node_ips))
 
     ListenProcess.start()
