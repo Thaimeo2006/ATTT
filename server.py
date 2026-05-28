@@ -44,37 +44,41 @@ def is_valid_chain(chain):
             
     return True
 
-def check_txid_and_get_balance_from_chain(transaction, chain):
+def check_txid_and_get_balance_from_chain(sender, chain, txid=None, check_txid = True):
     balance = 0
-    valid_txid = True
+    if check_txid == True:
+        valid_txid = True
     for block in chain:
         for trans in block.transactions_list:
-            if trans.txid == transaction.txid:
-                valid_txid = False
-                break
-            if trans.sender == transaction.sender:
+            if check_txid == True:
+                if trans.txid == txid:
+                    valid_txid = False
+                    break
+            if trans.sender == sender:
                 balance -= trans.amount
                 continue
-            if trans.receiver == transaction.sender:
+            if trans.receiver == sender:
                 balance += trans.amount
                 continue
-        if valid_txid == False: break
-    return valid_txid, balance
+        if check_txid == True and valid_txid == False: break
+    return valid_txid, balance if check_txid == True else balance
 
-def check_txid_and_get_balance_from_mempool(transaction, mempool):
+def check_txid_and_get_balance_from_mempool(sender, mempool, txid=None, check_txid = True):
     balance = 0
-    valid_txid = True
+    if check_txid == True:
+        valid_txid = True
     for trans in mempool:
-        if trans.txid == transaction.txid:
-            valid_txid = False
-            break
-        if trans.sender == transaction.sender:
+        if check_txid == True:
+            if trans.txid == txid:
+                valid_txid = False
+                break
+        if trans.sender == sender:
             balance -= trans.amount
             continue
-        if trans.receiver == transaction.sender:
+        if trans.receiver == sender:
             balance += trans.amount
             continue
-    return valid_txid, balance
+    return valid_txid, balance if check_txid == True else balance
 
 def clean_mempool(mempool, transactions_list):
     txid_to_remove = [trans.txid for trans in transactions_list]
@@ -337,9 +341,9 @@ def listen(chain, mempool, target, public_wallet, state_lock, event, mempool_loc
             "msg": msg
         }), 400
         with state_lock:
-            valid_in_chain, sender_balance_from_chain = check_txid_and_get_balance_from_chain(new_transaction, chain)
+            valid_in_chain, sender_balance_from_chain = check_txid_and_get_balance_from_chain(new_transaction.sender, chain, new_transaction.txid)
         with mempool_lock:
-            valid_in_mempool, sender_balance_from_mempool = check_txid_and_get_balance_from_mempool(new_transaction, mempool)
+            valid_in_mempool, sender_balance_from_mempool = check_txid_and_get_balance_from_mempool(new_transaction.sender, mempool, new_transaction.txid)
         if not valid_in_chain or not valid_in_mempool:
             return jsonify({
                 "valid": "False",
@@ -359,6 +363,17 @@ def listen(chain, mempool, target, public_wallet, state_lock, event, mempool_loc
             "valid": "True",
             "msg": "Transaction was verified successfully, please wait until it added to the chain."
         }), 200
+    
+    @app.route("/balance/<public_key>", methods= ["GET"])
+    def send_balance(public_key):
+        with state_lock: balance_from_chain = check_txid_and_get_balance_from_chain(public_key, chain, check_txid= False)
+        with mempool_lock: balance_from_mempool = check_txid_and_get_balance_from_mempool(public_key, mempool, check_txid= False)
+        balance = balance_from_chain+balance_from_mempool
+        return jsonify({
+            "balance": balance,
+            "msg": f"Here is the balance of wallet which address {public_key}. If balance equals to zero, maybe this wallet is not exist."
+        }), 200
+
     
     app.run(host = "0.0.0.0", port= 5000, use_reloader= False)
 
