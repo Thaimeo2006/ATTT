@@ -46,39 +46,31 @@ def is_valid_chain(chain):
 
 def check_txid_and_get_balance_from_chain(sender, chain, txid=None, check_txid = True):
     balance = 0
-    if check_txid == True:
-        valid_txid = True
+    valid_txid = True
     for block in chain:
         for trans in block.transactions_list:
-            if check_txid == True:
-                if trans.txid == txid:
-                    valid_txid = False
-                    break
+            if check_txid and trans.txid == txid:
+                valid_txid = False
+                break
             if trans.sender == sender:
                 balance -= trans.amount
-                continue
             if trans.receiver == sender:
                 balance += trans.amount
-                continue
-        if check_txid == True and valid_txid == False: break
-    return valid_txid, balance if check_txid == True else balance
+        if check_txid and not valid_txid: break
+    return valid_txid, balance
 
 def check_txid_and_get_balance_from_mempool(sender, mempool, txid=None, check_txid = True):
     balance = 0
-    if check_txid == True:
-        valid_txid = True
+    valid_txid = True
     for trans in mempool:
-        if check_txid == True:
-            if trans.txid == txid:
-                valid_txid = False
-                break
+        if check_txid and trans.txid == txid:
+            valid_txid = False
+            break
         if trans.sender == sender:
             balance -= trans.amount
-            continue
         if trans.receiver == sender:
             balance += trans.amount
-            continue
-    return valid_txid, balance if check_txid == True else balance
+    return valid_txid, balance
 
 def clean_mempool(mempool, transactions_list):
     txid_to_remove = [trans.txid for trans in transactions_list]
@@ -285,7 +277,7 @@ def listen(chain, mempool, target, public_wallet, state_lock, event, mempool_loc
             event.set()
             with state_lock:
                 chain.append(new_block)
-                adjust_target(target)
+                adjust_target(chain, target)
             with mempool_lock:
                 clean_mempool(mempool, new_block.transactions_list)
             return jsonify({
@@ -366,8 +358,8 @@ def listen(chain, mempool, target, public_wallet, state_lock, event, mempool_loc
     
     @app.route("/balance/<public_key>", methods= ["GET"])
     def send_balance(public_key):
-        with state_lock: balance_from_chain = check_txid_and_get_balance_from_chain(public_key, chain, check_txid= False)
-        with mempool_lock: balance_from_mempool = check_txid_and_get_balance_from_mempool(public_key, mempool, check_txid= False)
+        with state_lock: _, balance_from_chain = check_txid_and_get_balance_from_chain(public_key, chain, check_txid= False)
+        with mempool_lock: _, balance_from_mempool = check_txid_and_get_balance_from_mempool(public_key, mempool, check_txid= False)
         balance = balance_from_chain+balance_from_mempool
         return jsonify({
             "balance": balance,
@@ -396,7 +388,7 @@ def mine(chain, mempool, target, state_lock, mempool_lock, event, wallet_public_
             continue
         with state_lock:
             chain.append(block_mine)
-            adjust_target(target)
+            adjust_target(chain, target)
         with mempool_lock:
             clean_mempool(mempool, trans_mine[:-1])
 
