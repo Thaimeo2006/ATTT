@@ -2,5 +2,6 @@ nhap_server.py
 public_wallet.json
 my_wallet.json
 chain.json
-ip.json
+node_ips.json
+client
 __pycache__

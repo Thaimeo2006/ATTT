@@ -161,6 +161,9 @@ class Block:
         self.nonce: int = 0                                      
         self.transactions_list: list = None
 
+    def __repr__(self):
+        return json.dumps(self.to_dict(), indent=4)
+
     @classmethod
     def create_for_mine(cls, previous_block_hash, target, transactions_list):
         b = cls()

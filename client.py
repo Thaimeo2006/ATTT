@@ -5,7 +5,7 @@ import os
 
 print("BLOCKCHAIN CLI WALLET")
 
-with open("ip.json", "r") as f:
+with open("node_ips.json", "r") as f:
     peers = json.load(f)
 
 if os.path.exists("my_wallet.json"):
@@ -45,8 +45,9 @@ else:
 while True:
     print("Make a choice by enter the number...")
     print("1. Check the current chain")
-    print("2. Make new transaction")
-    print("3. Exit")
+    print("2. Show your balance")
+    print("3. Make new transaction")
+    print("4. Exit")
 
     choice = input()
     if choice == "1":
@@ -59,12 +60,22 @@ while True:
             break
 
     elif choice == "2":
+        for peer in peers:
+            try:
+                response = requests.get(f"{peer}/balance/{wallet.get_address()}", timeout = 2)
+            except requests.exceptions.RequestException:
+                continue
+            print(response.json())
+            break
+
+    elif choice == "3":
         receiver = input("Enter hex value of the receiver: ")
         while True:
             try:
                 amount = int(input("Enter the amount (int): "))
             except ValueError:
                 print("Invalid amount.")
+                continue
             if amount <= 0: print("???")
             else: break
 
@@ -80,12 +91,8 @@ while True:
             print(response.json())
             break
 
-    elif choice == "3":
+    elif choice == "4":
         break
 
     else:
         print("Invalid choice.")
-
-
-
-

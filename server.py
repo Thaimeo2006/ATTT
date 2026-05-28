@@ -24,6 +24,9 @@ def init_chain(wallet, event=None):
     genesis_block.mine(event)
     return [genesis_block], bytes.fromhex("1d00ffff")
 
+def read_chain(chain):
+    return [block for block in chain]
+
 def is_valid_chain(chain):
     """Check verification of blockchain"""
     temp_chain = list(chain)
@@ -113,7 +116,7 @@ def adjust_target(chain, target):
     old_target_hex = target.value.hex()
     target.value = num_to_target(new_target_num)
     
-    logging.info(f"--- ĐIỀU CHỈNH ĐỘ KHÓ ---")
+    logging.info(f"Adjust target")
     logging.info(f"Target cũ: {old_target_hex}")
     logging.info(f"Target mới: {target.value.hex()}")
 
@@ -193,7 +196,7 @@ def save_state(chain, target, ip):
         logging.warning(f"Error while saving the state: {e}")
 
     try:
-        with open("ip.json", "w") as f:
+        with open("node_ips.json", "w") as f:
             json.dump(list(ip), f)
         logging.info("Save IP list successfully.")
     except Exception as e:
@@ -394,17 +397,17 @@ if __name__ == "__main__":
             "private_key": wallet.private_key.to_string().hex()
         }
         with open("my_wallet.json", "w") as f:
-            json.dump(wallet_json, f)
+            json.dump(wallet_json, f, indent = 4)
 
     #Find running server in another node, load chain and target if found
-    if not os.path.exists("ip.json"):
-        logging.warning("ip.json not found, server will run locally!")
+    if not os.path.exists("node_ips.json"):
+        logging.warning("node_ips.json not found, server will run locally!")
         node_ips = []
-        with open("ip.json", "w") as f:
+        with open("node_ips.json", "w") as f:
             json.dump([], f)            
     else:
-        logging.info("ip.json found. Trying to connect...")
-        with open("ip.json", "r") as f:
+        logging.info("node_ips.json found. Trying to connect...")
+        with open("node_ips.json", "r") as f:
             node_ips = json.load(f)
     print(f"node_ips = {node_ips}")
 
@@ -434,14 +437,16 @@ if __name__ == "__main__":
             loaded_chain, loaded_target = load_chain(chain_json)
             chain = manager.list(loaded_chain)
             target = manager.Value(bytes, loaded_target)
-            print(list(chain), target.value)
+            print(f"chain = {read_chain(chain)}")
+            print(f"target = {target.value}")
         else:
             #Init first block
             logging.warning("chain.json not found. Initing the state...")
             loaded_chain, loaded_target = init_chain(wallet)
             chain = manager.list(loaded_chain)
             target = manager.Value(bytes, loaded_target)
-            print(list(chain), target.value)
+            print(f"chain = {read_chain(chain)}")
+            print(f"target = {target.value}")
 
 
     ListenProcess = Process(target= listen, args = (chain, mempool, target, state_lock, event, mempool_lock, node_ips))
