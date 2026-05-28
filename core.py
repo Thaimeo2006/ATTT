@@ -15,6 +15,23 @@ def target_to_num(target: bytes):
     e, c = int.from_bytes(exponent, "big"), int.from_bytes(coefficient, "big")
     return c * (1<<(8*(e-3)))
 
+def num_to_target(num: int) -> bytes:
+    if num == 0:
+        return b'\x00\x00\x00\x00'
+
+    num_bytes = num.to_bytes((num.bit_length() + 7) // 8, byteorder="big")
+    if num_bytes[0] >= 0x80:
+        num_bytes = b'\x00' + num_bytes
+
+    exponent_int = len(num_bytes)
+    if exponent_int <= 3:
+        coefficient = num_bytes + b'\x00' * (3 - exponent_int)
+    else:
+        coefficient = num_bytes[:3]
+
+    exponent = bytes([exponent_int])
+    return exponent + coefficient
+    
 
 def merkle(transactions_list):
     if not transactions_list: return b"\x00"*32
