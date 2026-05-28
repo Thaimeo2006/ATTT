@@ -179,7 +179,7 @@ def solve_conflicts(chain, target, node_ips):
         
     return False
 
-def save_state(chain, target, ip, pw_json):
+def save_state(chain, target, ip):
     try:
         chain_list = [block.to_dict() for block in list(chain)]
         state = {
@@ -199,14 +199,8 @@ def save_state(chain, target, ip, pw_json):
     except Exception as e:
         logging.warning(f"Error while saving IP list: {e}")
 
-    try:
-        with open("public_wallet.json", "w") as f:
-            json.dump(pw_json, f)
-        logging.info("Save public wallet list successfully.")
-    except Exception as e:
-        logging.warning(f"Error while saving public wallet list: {e}")
 
-def listen(chain, mempool, target, public_wallet, state_lock, event, mempool_lock, pw_lock, node_ips):
+def listen(chain, mempool, target, state_lock, event, mempool_lock, node_ips):
     app = Flask(__name__)
 
     @app.route("/receive_chain", methods = ["GET"])
@@ -290,30 +284,6 @@ def listen(chain, mempool, target, public_wallet, state_lock, event, mempool_loc
                 "valid": "False",
                 "msg": msg
             }), 400
-    
-    @app.route("/new_wallet", methods= ["POST"])
-    def verify_key_and_save():
-        response = request.get_json()
-        if not response or "public_key" not in response:
-            return jsonify({
-                "valid": "False",
-                "msg": "Bad response. Missing public_key." 
-            }), 400
-        else:
-            new_wallet_public_key = response["public_key"]
-        
-        with pw_lock:
-            if new_wallet_public_key in public_wallet:
-                return jsonify({
-                    "valid": "False",
-                    "msg": "This address was already existed. Please try again."
-                }), 400
-            else:
-                public_wallet.append(new_wallet_public_key)
-            return jsonify({
-                "valid": "True",
-                "msg": "New_wallet created successfully. Now you can make transaction by CLI."
-            }), 201
         
     @app.route("/make_new_transaction", methods= ["POST"])
     def verify_add_and_broadcast_transaction():
@@ -368,7 +338,7 @@ def listen(chain, mempool, target, public_wallet, state_lock, event, mempool_loc
         }), 200
 
     
-    app.run(host = "0.0.0.0", port= 5000, use_reloader= False)
+    app.run(host = "0.0.0.0", port= 5000, use_reloader= False, debug= True)
 
 
 def mine(chain, mempool, target, state_lock, mempool_lock, event, wallet_public_key, node_ips):
@@ -400,7 +370,7 @@ if __name__ == "__main__":
     #Set log level
     logging.basicConfig(level=logging.INFO)
 
-    #Global var: mempool, chain, target, public_wallet
+    #Global var: mempool, chain, target
     manager = Manager()
     mempool = manager.list([])
     
@@ -409,8 +379,6 @@ if __name__ == "__main__":
     mempool_lock = Lock()
     event = Event()
 
-    pw_lock = Lock()
-
     #Create own wallet and load public wallet
     if os.path.exists("my_wallet.json"):
         #Auto sign in
@@ -418,10 +386,8 @@ if __name__ == "__main__":
         with open("my_wallet.json", "r") as f:
             wallet_json = json.load(f)
         wallet = Wallet.from_dict(wallet_json)
-        with open("public_wallet.json", "r") as f:
-            public_wallet = manager.list(json.load(f))
     else:
-        #Auto sign up, create empty public_wallet.json and add your own public key to this
+        #Auto sign up
         logging.info("my_wallet.json not found. Creating new wallet...")
         wallet = Wallet()
         wallet_json = {
@@ -429,7 +395,6 @@ if __name__ == "__main__":
         }
         with open("my_wallet.json", "w") as f:
             json.dump(wallet_json, f)
-        public_wallet = manager.list([wallet.get_address()])
 
     #Find running server in another node, load chain and target if found
     if not os.path.exists("ip.json"):
@@ -460,6 +425,7 @@ if __name__ == "__main__":
     
     if not found_server:
         #Only you run the server
+        logging.warning("Running server not found. Only you run the server.")
         if os.path.exists("chain.json"):
             #Load data if this computer used to run server
             logging.info("chain.json found. Loading chain and target from it ...")
@@ -478,7 +444,7 @@ if __name__ == "__main__":
             print(list(chain), target.value)
 
 
-    ListenProcess = Process(target= listen, args = (chain, mempool, target, public_wallet, state_lock, event, mempool_lock, pw_lock, node_ips))
+    ListenProcess = Process(target= listen, args = (chain, mempool, target, state_lock, event, mempool_lock, node_ips))
     MineProcess = Process(target = mine, args = (chain, mempool, target, state_lock, mempool_lock, event, wallet.get_address(), node_ips))
 
     print("Starting listen process...")
@@ -490,15 +456,15 @@ if __name__ == "__main__":
         ListenProcess.join()
         MineProcess.join()
     except KeyboardInterrupt:
-        logging.info("Shutting down server. Please wait from saving data to Disk...")
+        logging.info("Ending process signal found. Shutting down server. Killing process...")
 
         ListenProcess.terminate()
         MineProcess.terminate()
         ListenProcess.join()
         MineProcess.join()
         
-        logging.info("Ending process signal found. Saving state to disk...")
-        save_state(chain, target, node_ips, list(public_wallet))
+        logging.info("Saving state to disk...")
+        save_state(chain, target, node_ips)
         logging.info("Close")
         sys.exit(0)
                         
