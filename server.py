@@ -1,6 +1,6 @@
 from multiprocessing import Process, Event, Manager, Lock
 from flask import Flask, request, jsonify
-from core import Transaction, Block, Wallet
+from core import Transaction, Block, Wallet, target_to_num, num_to_target
 import json
 import logging
 import os
@@ -81,8 +81,44 @@ def clean_mempool(mempool, transactions_list):
     remaining_mempool = [trans for trans in list(mempool) if trans.txid not in txid_to_remove]
     mempool[:] = remaining_mempool
 
-def adjust_target(target):
-    pass
+def adjust_target(chain, target):
+    # BLOCKS_PER_EPOCH, TARGET_TIMESPAN in reality are 2016 and 14 days respectively.
+    # If you want to test in local computer, you can set them lower to see the change immediately.
+    BLOCKS_PER_EPOCH = 2016 
+    TARGET_TIMESPAN = 14 * 24 * 60 * 60
+    MAX_TARGET = target_to_num(bytes.fromhex("1d00ffff"))
+
+    # Adjust only if len(chain) is multiples of BLOCK_PER_EPOCH
+    if len(chain) % BLOCKS_PER_EPOCH != 0:
+        return
+    
+    last_block = chain[-1]
+    first_block_in_epoch = chain[-BLOCKS_PER_EPOCH] 
+
+    actual_timespan = last_block.timestamp - first_block_in_epoch.timestamp
+
+    # If block mining too fast or slow, set the limit
+    if actual_timespan < TARGET_TIMESPAN // 4:
+        actual_timespan = TARGET_TIMESPAN // 4
+
+    if actual_timespan > TARGET_TIMESPAN * 4:
+        actual_timespan = TARGET_TIMESPAN * 4
+
+    # Calculate new target
+    current_target_num = target_to_num(target.value)
+    new_target_num = (current_target_num * actual_timespan) // TARGET_TIMESPAN
+
+    # Make sure that new target is lower than MAX_TARGET
+    if new_target_num > MAX_TARGET:
+        new_target_num = MAX_TARGET
+
+    # Update
+    old_target_hex = target.value.hex()
+    target.value = num_to_target(new_target_num)
+    
+    logging.info(f"--- ĐIỀU CHỈNH ĐỘ KHÓ ---")
+    logging.info(f"Target cũ: {old_target_hex}")
+    logging.info(f"Target mới: {target.value.hex()}")
 
 def send_new_transaction(peer_url, tx_dict):
     try:
@@ -351,8 +387,6 @@ def mine(chain, mempool, target, state_lock, mempool_lock, event, wallet_public_
 
         logging.info("Broadcasting mined block to another node...")
         broadcast_block(block_mine, node_ips)
-
-        
 
 if __name__ == "__main__":
     #Global var: mempool, chain, target, public_wallet
