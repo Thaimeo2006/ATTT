@@ -19,6 +19,7 @@ def load_chain(chain_json):
     
 def init_chain(wallet, event=None):
     first_transaction = Transaction.create_reward(wallet.get_address(), 50)
+    #Target of genesis block is "1d00ffff". In simulator env, you can adjust easier
     genesis_block = Block.create_for_mine(b"\x00"*32, bytes.fromhex("1d00ffff"), [first_transaction])
     genesis_block.mine(event)
     return [genesis_block], bytes.fromhex("1d00ffff")
@@ -80,7 +81,7 @@ def clean_mempool(mempool, transactions_list):
 def adjust_target(chain, target):
     # BLOCKS_PER_EPOCH, TARGET_TIMESPAN in reality are 2016 and 14 days respectively.
     # If you want to test in local computer, you can set them lower to see the change immediately.
-    BLOCKS_PER_EPOCH = 2016 
+    BLOCKS_PER_EPOCH = 2016
     TARGET_TIMESPAN = 14 * 24 * 60 * 60
     MAX_TARGET = target_to_num(bytes.fromhex("1d00ffff"))
 
@@ -183,7 +184,7 @@ def save_state(chain, target, ip, pw_json):
         chain_list = [block.to_dict() for block in list(chain)]
         state = {
             "chain": chain_list,
-            "target": target.value
+            "target": target.value.hex()
         }
         with open("chain.json", "w") as f:
             json.dump(state, f)
@@ -396,6 +397,9 @@ def mine(chain, mempool, target, state_lock, mempool_lock, event, wallet_public_
         broadcast_block(block_mine, node_ips)
 
 if __name__ == "__main__":
+    #Set log level
+    logging.basicConfig(level=logging.INFO)
+
     #Global var: mempool, chain, target, public_wallet
     manager = Manager()
     mempool = manager.list([])
@@ -409,7 +413,8 @@ if __name__ == "__main__":
 
     #Create own wallet and load public wallet
     if os.path.exists("my_wallet.json"):
-        #Auto sign in       
+        #Auto sign in
+        logging.info("Found my_wallet.json. Auto sign in...")       
         with open("my_wallet.json", "r") as f:
             wallet_json = json.load(f)
         wallet = Wallet.from_dict(wallet_json)
@@ -417,6 +422,7 @@ if __name__ == "__main__":
             public_wallet = manager.list(json.load(f))
     else:
         #Auto sign up, create empty public_wallet.json and add your own public key to this
+        logging.info("my_wallet.json not found. Creating new wallet...")
         wallet = Wallet()
         wallet_json = {
             "private_key": wallet.private_key.to_string().hex()
@@ -432,8 +438,10 @@ if __name__ == "__main__":
         with open("ip.json", "w") as f:
             json.dump([], f)            
     else:
+        logging.info("ip.json found. Trying to connect...")
         with open("ip.json", "r") as f:
             node_ips = json.load(f)
+    print(f"node_ips = {node_ips}")
 
     found_server = False
     if node_ips:
@@ -442,6 +450,7 @@ if __name__ == "__main__":
                 response = requests.get(f"{peer}/receive_chain", timeout= 3)
                 if response.status_code == 200:
                     loaded_chain, loaded_target = load_chain(response.json())
+                    logging.info(f"Server found in peer {peer}. Loading state and target from it ...")
                     chain = manager.list(loaded_chain)
                     target = manager.Value(bytes, loaded_target)
                     found_server = True
@@ -453,22 +462,28 @@ if __name__ == "__main__":
         #Only you run the server
         if os.path.exists("chain.json"):
             #Load data if this computer used to run server
+            logging.info("chain.json found. Loading chain and target from it ...")
             with open("chain.json", "r") as f:
                 chain_json = json.load(f)
             loaded_chain, loaded_target = load_chain(chain_json)
             chain = manager.list(loaded_chain)
             target = manager.Value(bytes, loaded_target)
+            print(list(chain), target.value)
         else:
             #Init first block
+            logging.warning("chain.json not found. Initing the state...")
             loaded_chain, loaded_target = init_chain(wallet)
             chain = manager.list(loaded_chain)
             target = manager.Value(bytes, loaded_target)
+            print(list(chain), target.value)
 
 
     ListenProcess = Process(target= listen, args = (chain, mempool, target, public_wallet, state_lock, event, mempool_lock, pw_lock, node_ips))
     MineProcess = Process(target = mine, args = (chain, mempool, target, state_lock, mempool_lock, event, wallet.get_address(), node_ips))
 
+    print("Starting listen process...")
     ListenProcess.start()
+    print("Starting mining process...")
     MineProcess.start()
 
     try:
@@ -482,6 +497,8 @@ if __name__ == "__main__":
         ListenProcess.join()
         MineProcess.join()
         
+        logging.info("Ending process signal found. Saving state to disk...")
         save_state(chain, target, node_ips, list(public_wallet))
+        logging.info("Close")
         sys.exit(0)
                         
