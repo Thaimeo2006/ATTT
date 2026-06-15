@@ -24,7 +24,7 @@ def init_chain(wallet, event=None):
     #Target of genesis block is "1d00ffff". In simulator env, you can adjust easier
     genesis_block = Block.create_for_mine(b"\x00"*32, bytes.fromhex("1d00ffff"), [first_transaction])
     genesis_block.mine(event)
-    return [genesis_block], bytes.fromhex("1d00ffff")
+    return [genesis_block], genesis_block.target
 
 def read_chain(chain):
     return [block for block in chain]
@@ -164,11 +164,11 @@ def solve_conflicts(chain, target, node_ips):
                 chain_json = response.json()
                 peer_length = len(chain_json["chain"])
                 
-                # Chỉ kiểm tra nếu chuỗi của họ DÀI HƠN chuỗi của mình
+                # Check only if thier chain longer than mine
                 if peer_length > max_length:
                     temp_chain, temp_target = load_and_check_chain(chain_json)
                     
-                    # Xác thực toàn bộ chuỗi của họ
+                    # Verify their chain
                     if is_valid_chain(temp_chain):
                         max_length = peer_length
                         longest_chain = temp_chain
