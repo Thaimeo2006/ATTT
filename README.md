@@ -102,5 +102,3 @@ Ghi chú khi gửi giao dịch:
 ## 🤝 Đóng góp
 
 Mọi đóng góp, báo lỗi (issues) hay pull requests đều được chào đón để làm cho dự án này trở thành một tài liệu học tập tốt hơn.
-
-License: MIT (Hoặc loại giấy phép bạn muốn sử dụng)
