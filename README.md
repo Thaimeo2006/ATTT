@@ -95,12 +95,10 @@ Ghi chú khi gửi giao dịch:
 
 - Giao dịch sẽ được đưa vào Mempool, được phát sóng (broadcast), và sẽ hiển thị trừ/cộng tiền sau khi được một thợ đào (miner) đóng gói vào khối mới.
 
-⚠️ Lưu ý (Disclaimer)
+## ⚠️ Lưu ý (Disclaimer)
 
 Đây là một dự án mô phỏng phục vụ hoàn toàn cho mục đích giáo dục và nghiên cứu. Thuật toán mạng (HTTP API thay vì TCP Sockets thuần), quy trình lưu trữ (Lưu ra file JSON), và cơ chế mã hóa mật khẩu chưa được tối ưu hóa cho môi trường sản xuất thực tế. Tuyệt đối không sử dụng mã nguồn này để lưu trữ giá trị tài sản thật.
 
-🤝 Đóng góp
+## 🤝 Đóng góp
 
 Mọi đóng góp, báo lỗi (issues) hay pull requests đều được chào đón để làm cho dự án này trở thành một tài liệu học tập tốt hơn.
-
-License: MIT (Hoặc loại giấy phép bạn muốn sử dụng)
