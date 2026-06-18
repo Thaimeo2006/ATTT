@@ -76,7 +76,7 @@ while True:
             except ValueError:
                 print("Invalid amount.")
                 continue
-            if amount <= 0: print("???")
+            if amount < 0: print("???")
             else: break
 
         new_transaction = Transaction.new(wallet.get_address(), receiver, amount)

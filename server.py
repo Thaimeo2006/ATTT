@@ -9,20 +9,22 @@ import time
 import sys
 import threading
 
-def load_chain(chain_json):
+def load_and_check_chain(chain_json):
     target = bytes.fromhex(chain_json["target"])
     chain = []
     for b_dict in chain_json["chain"]:
         block = Block.from_dict(b_dict)
         chain.append(block)
-    return chain, target
+    check = is_valid_chain(chain)
+    if check: return chain, target
+    else: return None, None
     
 def init_chain(wallet, event=None):
     first_transaction = Transaction.create_reward(wallet.get_address(), 50)
     #Target of genesis block is "1d00ffff". In simulator env, you can adjust easier
     genesis_block = Block.create_for_mine(b"\x00"*32, bytes.fromhex("1d00ffff"), [first_transaction])
     genesis_block.mine(event)
-    return [genesis_block], bytes.fromhex("1d00ffff")
+    return [genesis_block], genesis_block.target
 
 def read_chain(chain):
     return [block for block in chain]
@@ -117,13 +119,13 @@ def adjust_target(chain, target):
     target.value = num_to_target(new_target_num)
     
     logging.info(f"Adjust target")
-    logging.info(f"Target cũ: {old_target_hex}")
-    logging.info(f"Target mới: {target.value.hex()}")
+    logging.info(f"Old target: {old_target_hex}")
+    logging.info(f"New target: {target.value.hex()}")
 
-def send_new_transaction(peer_url, tx_dict):
+def send_new_transaction(peer, tx_dict):
     try:
-        requests.post(f"{peer_url}/make_new_transaction?from_server=true", json=tx_dict, timeout=3)
-        logging.info(f"[Broadcast TX] Đã gửi giao dịch tới {peer_url}")
+        requests.post(f"{peer}/make_new_transaction?from_server=true", json=tx_dict, timeout=3)
+        logging.info(f"New transaction was send to {peer}")
     except requests.exceptions.RequestException:
         pass
 
@@ -136,7 +138,7 @@ def broadcast_transaction(transaction, node_ips):
 def send_new_block(peer_url, block_dict):
     try:
         requests.post(f"{peer_url}/get_new_block", json=block_dict, timeout=3)
-        logging.info(f"Đã gửi block tới {peer_url}")
+        logging.info(f"Mined block was send to {peer_url}")
     except requests.exceptions.RequestException:
         pass
 
@@ -162,11 +164,11 @@ def solve_conflicts(chain, target, node_ips):
                 chain_json = response.json()
                 peer_length = len(chain_json["chain"])
                 
-                # Chỉ kiểm tra nếu chuỗi của họ DÀI HƠN chuỗi của mình
+                # Check only if thier chain longer than mine
                 if peer_length > max_length:
-                    temp_chain, temp_target = load_chain(chain_json)
+                    temp_chain, temp_target = load_and_check_chain(chain_json)
                     
-                    # Xác thực toàn bộ chuỗi của họ
+                    # Verify their chain
                     if is_valid_chain(temp_chain):
                         max_length = peer_length
                         longest_chain = temp_chain
@@ -202,8 +204,7 @@ def save_state(chain, target, ip):
     except Exception as e:
         logging.warning(f"Error while saving IP list: {e}")
 
-
-def listen(chain, mempool, target, state_lock, event, mempool_lock, node_ips):
+def listen(chain, mempool, target, state_lock, event, mempool_lock, node_ips, port):
     app = Flask(__name__)
 
     @app.route("/receive_chain", methods = ["GET"])
@@ -341,7 +342,7 @@ def listen(chain, mempool, target, state_lock, event, mempool_lock, node_ips):
         }), 200
 
     
-    app.run(host = "0.0.0.0", port= 5000, use_reloader= False, debug= True)
+    app.run(host = "0.0.0.0", port= port, use_reloader= False, debug= True)
 
 
 def mine(chain, mempool, target, state_lock, mempool_lock, event, wallet_public_key, node_ips):
@@ -372,6 +373,7 @@ def mine(chain, mempool, target, state_lock, mempool_lock, event, wallet_public_
 if __name__ == "__main__":
     #Set log level
     logging.basicConfig(level=logging.INFO)
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
 
     #Global var: mempool, chain, target
     manager = Manager()
@@ -417,12 +419,16 @@ if __name__ == "__main__":
             try:
                 response = requests.get(f"{peer}/receive_chain", timeout= 3)
                 if response.status_code == 200:
-                    loaded_chain, loaded_target = load_chain(response.json())
+                    loaded_chain, loaded_target = load_and_check_chain(response.json())
                     logging.info(f"Server found in peer {peer}. Loading state and target from it ...")
-                    chain = manager.list(loaded_chain)
-                    target = manager.Value(bytes, loaded_target)
-                    found_server = True
-                    break
+                    if loaded_target is not None:
+                        chain = manager.list(loaded_chain)
+                        target = manager.Value(bytes, loaded_target)
+                        found_server = True
+                        break
+                    else:
+                        logging.warning(f"Chain in {peer} is invalid. Move to next peer...")
+                        continue
             except requests.exceptions.RequestException:
                 continue
     
@@ -434,22 +440,24 @@ if __name__ == "__main__":
             logging.info("chain.json found. Loading chain and target from it ...")
             with open("chain.json", "r") as f:
                 chain_json = json.load(f)
-            loaded_chain, loaded_target = load_chain(chain_json)
-            chain = manager.list(loaded_chain)
-            target = manager.Value(bytes, loaded_target)
-            print(f"chain = {read_chain(chain)}")
-            print(f"target = {target.value}")
+            loaded_chain, loaded_target = load_and_check_chain(chain_json)
+            if loaded_target is not None:
+                chain = manager.list(loaded_chain)
+                target = manager.Value(bytes, loaded_target)
+            else: raise ValueError("Chain loaded is invalid!")
+
         else:
             #Init first block
             logging.warning("chain.json not found. Initing the state...")
             loaded_chain, loaded_target = init_chain(wallet)
             chain = manager.list(loaded_chain)
             target = manager.Value(bytes, loaded_target)
-            print(f"chain = {read_chain(chain)}")
-            print(f"target = {target.value}")
+
+    print(f"chain = {read_chain(chain)}")
+    print(f"target = {target.value}")
 
 
-    ListenProcess = Process(target= listen, args = (chain, mempool, target, state_lock, event, mempool_lock, node_ips))
+    ListenProcess = Process(target= listen, args = (chain, mempool, target, state_lock, event, mempool_lock, node_ips, port))
     MineProcess = Process(target = mine, args = (chain, mempool, target, state_lock, mempool_lock, event, wallet.get_address(), node_ips))
 
     print("Starting listen process...")
