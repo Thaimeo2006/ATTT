@@ -31,9 +31,10 @@ else:
 while True:
     print("Make a choice by enter the number...")
     print("1. Check the current chain")
-    print("2. Show your balance")
-    print("3. Make new transaction")
-    print("4. Exit")
+    print("2. Show your public key")
+    print("3. Show your balance")
+    print("4. Make new transaction")
+    print("5. Exit")
 
     choice = input()
     if choice == "1":
@@ -46,6 +47,9 @@ while True:
             break
 
     elif choice == "2":
+        print(wallet.get_address())
+
+    elif choice == "3":
         for peer in peers:
             try:
                 response = requests.get(f"{peer}/balance/{wallet.get_address()}", timeout = 2)
@@ -54,7 +58,7 @@ while True:
             print(response.json())
             break
 
-    elif choice == "3":
+    elif choice == "4":
         receiver = input("Enter hex value of the receiver: ")
         while True:
             try:
@@ -77,7 +81,7 @@ while True:
             print(response.json())
             break
 
-    elif choice == "4":
+    elif choice == "45":
         break
 
     else:
