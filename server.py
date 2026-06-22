@@ -22,7 +22,7 @@ def load_and_check_chain(chain_json):
 def init_chain(wallet, event=None):
     first_transaction = Transaction.create_reward(wallet.get_address(), 50)
     #Target of genesis block is "1d00ffff". In simulator env, you can adjust easier
-    genesis_block = Block.create_for_mine(b"\x00"*32, bytes.fromhex("1d00ffff"), [first_transaction])
+    genesis_block = Block.create_for_mine(b"\x00"*32, bytes.fromhex("2000ffff"), [first_transaction])
     genesis_block.mine(event)
     return [genesis_block], genesis_block.target
 
@@ -184,7 +184,7 @@ def solve_conflicts(chain, target, node_ips):
         
     return False
 
-def save_state(chain, target, ip):
+def save_state(chain, target):
     try:
         chain_list = [block.to_dict() for block in list(chain)]
         state = {
@@ -192,17 +192,10 @@ def save_state(chain, target, ip):
             "target": target.value.hex()
         }
         with open("chain.json", "w") as f:
-            json.dump(state, f)
+            json.dump(state, f, indent = 4)
         logging.info("Save state successfully.")
     except Exception as e:
         logging.warning(f"Error while saving the state: {e}")
-
-    try:
-        with open("node_ips.json", "w") as f:
-            json.dump(list(ip), f)
-        logging.info("Save IP list successfully.")
-    except Exception as e:
-        logging.warning(f"Error while saving IP list: {e}")
 
 def listen(chain, mempool, target, state_lock, event, mempool_lock, node_ips, port):
     app = Flask(__name__)
@@ -401,12 +394,11 @@ if __name__ == "__main__":
         with open("my_wallet.json", "w") as f:
             json.dump(wallet_json, f, indent = 4)
 
-    #Find running server in another node, load chain and target if found
+    #Find running server in fixed node, load chain and target if found
     if not os.path.exists("node_ips.json"):
         logging.warning("node_ips.json not found, server will run locally!")
         node_ips = []
-        with open("node_ips.json", "w") as f:
-            json.dump([], f)            
+          
     else:
         logging.info("node_ips.json found. Trying to connect...")
         with open("node_ips.json", "r") as f:
@@ -477,7 +469,7 @@ if __name__ == "__main__":
         MineProcess.join()
         
         logging.info("Saving state to disk...")
-        save_state(chain, target, node_ips)
+        save_state(chain, target)
         logging.info("Close")
         sys.exit(0)
                         

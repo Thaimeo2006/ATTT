@@ -32,6 +32,8 @@ Dựa trên mã nguồn, dự án chia thành 3 phần chính (bạn nên lưu t
 
 - wallet.py: Giao diện người dùng dạng dòng lệnh để thao tác với ví.
 
+- node_ips.json: Lưu danh sách các host server cứng
+
 - requirements.txt: Chứa các thư viện phụ thuộc.
 
 ## 🚀 Hướng dẫn Cài đặt
@@ -55,6 +57,8 @@ pip install -r requirements.txt
 
 Mỗi node cần có một danh sách các IP của node khác để kết nối. Bạn hãy tạo một file node_ips.json (ví dụ: ["http://127.0.0.1:5001"]). Nếu chạy node đầu tiên, file này có thể để trống [].
 
+Mô hình mạng ngang hàng cần có một danh sách các địa chỉ cứng để phục vụ nhu cầu kết nối cho các node mới. Bạn hãy chỉnh sửa file node_ips.json với các host phù hợp.
+
 Chạy node trên một port cụ thể (mặc định là 5000):
 ```bash
 python server.py 5000
@@ -67,7 +71,7 @@ Mở các terminal khác nhau và chạy:
 
 - Terminal 1: python server.py 5000
 
-- Terminal 2: python server.py 5001 (Nhớ cập nhật node_ips.json để chúng trỏ tới nhau).
+- Terminal 2: python server.py 5001
 
 2. Sử dụng Ví tương tác (CLI)
 
