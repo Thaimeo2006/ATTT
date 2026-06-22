@@ -43,7 +43,7 @@ while True:
                 response = requests.get(f"{peer}/receive_chain", timeout= 2)
             except requests.exceptions.RequestException:
                 continue
-            print(response.json())
+            print(json.dumps(response.json(), indent = 4))
             break
 
     elif choice == "2":
