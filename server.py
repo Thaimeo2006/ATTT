@@ -192,7 +192,7 @@ def save_state(chain, target):
             "target": target.value.hex()
         }
         with open("chain.json", "w") as f:
-            json.dump(state, f)
+            json.dump(state, f, indent = 4)
         logging.info("Save state successfully.")
     except Exception as e:
         logging.warning(f"Error while saving the state: {e}")
