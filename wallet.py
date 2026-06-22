@@ -81,7 +81,7 @@ while True:
             print(response.json())
             break
 
-    elif choice == "45":
+    elif choice == "5":
         break
 
     else:
